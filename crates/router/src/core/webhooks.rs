@@ -38,24 +38,28 @@ async fn payments_incoming_webhook_flow<W: api::OutgoingWebhookType>(
         payments::CallConnectorAction::Trigger
     };
 
-    let payments_response = payments::payments_core::<api::PSync, api::PaymentsResponse, _, _, _>(
-        &state,
-        merchant_account.clone(),
-        payments::operations::PaymentStatus,
-        api::PaymentsRetrieveRequest {
-            resource_id: api::PaymentIdType::ConnectorTransactionId(
-                webhook_details.object_reference_id,
-            ),
-            merchant_id: Some(merchant_account.merchant_id.clone()),
-            force_sync: true,
-            connector: None,
-            param: None,
-        },
-        services::AuthFlow::Merchant,
-        consume_or_trigger_flow,
-    )
-    .await
-    .change_context(errors::WebhooksFlowError::PaymentsCoreFailed)?;
+    let payments_response = match webhook_details.object_reference_id {
+        api_models::webhooks::ObjectReferenceId::PaymentId(id) => {
+            payments::payments_core::<api::PSync, api::PaymentsResponse, _, _, _>(
+                &state,
+                merchant_account.clone(),
+                payments::operations::PaymentStatus,
+                api::PaymentsRetrieveRequest {
+                    resource_id: id,
+                    merchant_id: Some(merchant_account.merchant_id.clone()),
+                    force_sync: true,
+                    connector: None,
+                    param: None,
+                    merchant_connector_details: None,
+                },
+                services::AuthFlow::Merchant,
+                consume_or_trigger_flow,
+            )
+            .await
+            .change_context(errors::WebhooksFlowError::PaymentsCoreFailed)?
+        }
+        _ => Err(errors::WebhooksFlowError::PaymentsCoreFailed).into_report()?,
+    };
 
     match payments_response {
         services::ApplicationResponse::Json(payments_response) => {
@@ -138,15 +142,22 @@ async fn refunds_incoming_webhook_flow<W: api::OutgoingWebhookType>(
                 )
             })?
     } else {
-        refunds::refund_retrieve_core(&state, merchant_account.clone(), refund_id.to_owned())
-            .await
-            .change_context(errors::WebhooksFlowError::RefundsCoreFailed)
-            .attach_printable_lazy(|| {
-                format!(
-                    "Failed while updating refund: refund_id: {}",
-                    refund_id.to_owned()
-                )
-            })?
+        refunds::refund_retrieve_core(
+            &state,
+            merchant_account.clone(),
+            api_models::refunds::RefundsRetrieveRequest {
+                refund_id: refund_id.to_owned(),
+                merchant_connector_details: None,
+            },
+        )
+        .await
+        .change_context(errors::WebhooksFlowError::RefundsCoreFailed)
+        .attach_printable_lazy(|| {
+            format!(
+                "Failed while updating refund: refund_id: {}",
+                refund_id.to_owned()
+            )
+        })?
     };
     let event_type: enums::EventType = updated_refund
         .refund_status
