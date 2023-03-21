@@ -105,32 +105,16 @@ async fn refunds_incoming_webhook_flow<W: api::OutgoingWebhookType>(
 ) -> CustomResult<(), errors::WebhooksFlowError> {
     let db = &*state.store;
     //find refund by connector refund id
-    let refund = match webhook_details.object_reference_id {
-        api_models::webhooks::ObjectReferenceId::RefundId(
-            api_models::webhooks::RefundIdType::ConnectorRefundId(id),
-        ) => db
-            .find_refund_by_merchant_id_connector_refund_id_connector(
-                &merchant_account.merchant_id,
-                &id,
-                connector_name,
-                merchant_account.storage_scheme,
-            )
-            .await
-            .change_context(errors::WebhooksFlowError::ResourceNotFound)
-            .attach_printable_lazy(|| "Failed fetching the refund")?,
-        api_models::webhooks::ObjectReferenceId::RefundId(
-            api_models::webhooks::RefundIdType::RefundId(id),
-        ) => db
-            .find_refund_by_merchant_id_refund_id(
-                &merchant_account.merchant_id,
-                &id,
-                merchant_account.storage_scheme,
-            )
-            .await
-            .change_context(errors::WebhooksFlowError::ResourceNotFound)
-            .attach_printable_lazy(|| "Failed fetching the refund")?,
-        _ => Err(errors::WebhooksFlowError::RefundsCoreFailed).into_report()?,
-    };
+    let refund = db
+        .find_refund_by_merchant_id_connector_refund_id_connector(
+            &merchant_account.merchant_id,
+            &webhook_details.object_reference_id,
+            connector_name,
+            merchant_account.storage_scheme,
+        )
+        .await
+        .change_context(errors::WebhooksFlowError::ResourceNotFound)
+        .attach_printable_lazy(|| "Failed fetching the refund")?;
     let refund_id = refund.refund_id.to_owned();
     //if source verified then update refund status else trigger refund sync
     let updated_refund = if source_verified {
